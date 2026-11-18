@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Дневник Давления</title>
+  
+  <!-- Подключение Telegram Web App -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <!-- Подключение стилей Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Подключение React -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <!-- Подключение Babel для работы React прямо в браузере -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    body {
+      background-color: var(--tg-theme-bg-color, #f3f4f6);
+      color: var(--tg-theme-text-color, #1f2937);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      overscroll-behavior-y: none;
+    }
+    .picker-container {
+      height: 120px;
+      overflow-y: scroll;
+      scroll-snap-type: y mandatory;
+      scrollbar-width: none; /* Firefox */
+    }
+    .picker-container::-webkit-scrollbar { display: none; } /* Safari/Chrome */
+    .picker-item {
+      height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      scroll-snap-align: center;
+      font-size: 1.5rem;
+      font-weight: 600;
+      color: var(--tg-theme-text-color, #111827);
+    }
+    .picker-highlight {
+      position: absolute;
+      top: 50%;
+      left: 0;
+      right: 0;
+      height: 40px;
+      margin-top: -20px;
+      background: var(--tg-theme-secondary-bg-color, #e5e7eb);
+      opacity: 0.5;
+      border-radius: 8px;
+      pointer-events: none;
+      z-index: -1;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+    const tg = window.Telegram.WebApp;
+
+    // Компонент скролл-пикера (барабана)
+    const ScrollPicker = ({ min, max, value, onChange, label }) => {
+      const items = Array.from({ length: max - min + 1 }, (_, i) => min + i);
+      const containerRef = useRef(null);
+
+      useEffect(() => {
+        if (containerRef.current) {
+          const index = items.indexOf(value);
+          containerRef.current.scrollTop = index * 40;
+        }
+      }, []);
+
+      const handleScroll = (e) => {
+        const index = Math.round(e.target.scrollTop / 40);
+        if (items[index] !== undefined && items[index] !== value) {
+          onChange(items[index]);
+        }
+      };
+
+      return (
+        <div className="flex flex-col items-center flex-1 relative">
+          <span className="text-sm text-gray-500 mb-1">{label}</span>
+          <div className="relative w-full px-2">
+            <div className="picker-highlight"></div>
+            <div 
+              ref={containerRef}
+              className="picker-container relative z-10" 
+              onScroll={handleScroll}
+            >
+              <div style={{ height: '40px' }}></div> {/* Отступы сверху */}
+              {items.map(item => (
+                <div key={item} className="picker-item">{item}</div>
+              ))}
+              <div style={{ height: '40px' }}></div> {/* Отступы снизу */}
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const App = () => {
+      const [activeTab, setActiveTab] = useState('measure');
+      const [sys, setSys] = useState(120);
+      const [dia, setDia] = useState(80);
+      const [pulse, setPulse] = useState(70);
+      const [selectedTags, setSelectedTags] = useState([]);
+      const [history, setHistory] = useState([]);
+      const [expandedRecord, setExpandedRecord] = useState(null);
+
+      const tags = ['Утро', 'День', 'Вечер', 'Головная боль', 'Слабость', 'Стресс', 'После кофе', 'Тренировка'];
+
+      useEffect(() => {
+        tg.expand(); // Разворачиваем на весь экран
+        tg.ready();
+        const saved = localStorage.getItem('bp_history');
+        if (saved) setHistory(JSON.parse(saved));
+      }, []);
+
+      const toggleTag = (tag) => {
+        if (selectedTags.includes(tag)) {
+          setSelectedTags(selectedTags.filter(t => t !== tag));
+        } else {
+          setSelectedTags([...selectedTags, tag]);
+        }
+      };
+
+      const handleSave = () => {
+        // Здесь можно добавить запрос к Gemini API
+        const mockRecommendation = `Показатели ${sys}/${dia} при пульсе ${pulse} с тегами (${selectedTags.join(', ')}) находятся в пределах нормы. Согласно исследованиям AHA, утренние замеры самые точные. Не забывайте пить воду!`;
+        
+        const newRecord = {
+          id: Date.now(),
+          date: new Date().toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }),
+          sys, dia, pulse,
+          tags: selectedTags,
+          recommendation: mockRecommendation
+        };
+
+        const newHistory = [newRecord, ...history];
+        setHistory(newHistory);
+        localStorage.setItem('bp_history', JSON.stringify(newHistory));
+        
+        tg.HapticFeedback.notificationOccurred('success');
+        setActiveTab('history');
+        setSelectedTags([]);
+      };
+
+      return (
+        <div className="pb-20 h-screen flex flex-col">
+          {/* Контент вкладок */}
+          <div className="flex-1 overflow-y-auto p-4">
+            
+            {/* Вкладка Замера */}
+            {activeTab === 'measure' && (
+              <div className="space-y-6">
+                <h2 className="text-xl font-bold text-center">Новый замер</h2>
+                
+                <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm flex justify-between">
+                  <ScrollPicker min={80} max={200} value={sys} onChange={setSys} label="SYS (Верх)" />
+                  <ScrollPicker min={50} max={130} value={dia} onChange={setDia} label="DIA (Низ)" />
+                  <ScrollPicker min={40} max={150} value={pulse} onChange={setPulse} label="ПУЛЬС" />
+                </div>
+
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-500 mb-3">Состояние и условия</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {tags.map(tag => (
+                      <button
+                        key={tag}
+                        onClick={() => toggleTag(tag)}
+                        className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                          selectedTags.includes(tag) 
+                            ? 'bg-blue-500 text-white' 
+                            : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
+                        }`}
+                      >
+                        {tag}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <button 
+                  onClick={handleSave}
+                  className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold text-lg shadow-lg active:scale-95 transition-transform"
+                >
+                  Сохранить замер
+                </button>
+              </div>
+            )}
+
+            {/* Вкладка Истории */}
+            {activeTab === 'history' && (
+              <div className="space-y-4">
+                <h2 className="text-xl font-bold mb-4">История замеров</h2>
+                {history.length === 0 ? (
+                  <p className="text-center text-gray-500 mt-10">Записей пока нет</p>
+                ) : (
+                  history.map(record => (
+                    <div key={record.id} className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm">
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-gray-500 text-sm">{record.date}</span>
+                        <div className="flex gap-2 text-lg font-bold">
+                          <span className={record.sys > 135 ? 'text-red-500' : 'text-green-500'}>{record.sys}</span>
+                          <span className="text-gray-400">/</span>
+                          <span className={record.dia > 85 ? 'text-red-500' : 'text-green-500'}>{record.dia}</span>
+                          <span className="text-gray-400">♥</span>
+                          <span>{record.pulse}</span>
+                        </div>
+                      </div>
+                      
+                      {record.tags.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mb-2">
+                          {record.tags.map(t => (
+                            <span key={t} className="text-xs bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded">{t}</span>
+                          ))}
+                        </div>
+                      )}
+
+                      <button 
+                        onClick={() => setExpandedRecord(expandedRecord === record.id ? null : record.id)}
+                        className="text-blue-500 text-sm font-medium mt-1"
+                      >
+                        {expandedRecord === record.id ? 'Скрыть ИИ-рекомендацию ↑' : 'Показать ИИ-рекомендацию ↓'}
+                      </button>
+                      
+                      {expandedRecord === record.id && (
+                        <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-900/30 rounded-lg text-sm text-gray-700 dark:text-gray-300">
+                          🤖 {record.recommendation}
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+
+            {/* Вкладка Инфо */}
+            {activeTab === 'info' && (
+              <div className="space-y-4">
+                <h2 className="text-xl font-bold mb-4">Справочник АД</h2>
+                <div className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm space-y-3 text-sm">
+                  <p><strong>Оптимальное:</strong> &lt; 120 / &lt; 80</p>
+                  <p><strong>Нормальное:</strong> 120-129 / 80-84</p>
+                  <p><strong>Высокое нормальное:</strong> 130-139 / 85-89</p>
+                  <p className="text-red-500"><strong>Гипертония 1 степени:</strong> 140-159 / 90-99</p>
+                  <hr className="border-gray-200 dark:border-gray-700" />
+                  <p className="text-gray-500">
+                    *Рекомендации ИИ носят справочный характер. При систематическом повышении давления обратитесь к врачу.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Нижняя навигация */}
+          <div className="fixed bottom-0 w-full bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 flex justify-around p-3 pb-8">
+            <button onClick={() => setActiveTab('measure')} className={`flex flex-col items-center ${activeTab === 'measure' ? 'text-blue-600' : 'text-gray-400'}`}>
+              <span className="text-xl">➕</span>
+              <span className="text-xs mt-1">Замер</span>
+            </button>
+            <button onClick={() => setActiveTab('history')} className={`flex flex-col items-center ${activeTab === 'history' ? 'text-blue-600' : 'text-gray-400'}`}>
+              <span className="text-xl">📋</span>
+              <span className="text-xs mt-1">История</span>
+            </button>
+            <button onClick={() => setActiveTab('info')} className={`flex flex-col items-center ${activeTab === 'info' ? 'text-blue-600' : 'text-gray-400'}`}>
+              <span className="text-xl">ℹ️</span>
+              <span className="text-xs mt-1">Инфо</span>
+            </button>
+          </div>
+        </div>
+      );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
